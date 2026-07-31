@@ -1,0 +1,103 @@
+name: ${COMPOSE_PROJECT_NAME:-rashen-processmaker}
+
+x-app-common: &app-common
+  image: linkchw/processmaker:3.8.3-50ee749@sha256:758a59baa95a927384fe9baae7622fb3187e3a6026a823c1f8b6b337ff4e4b25
+  platform: linux/amd64
+  environment:
+    PM_DB_HOST: db
+    PM_DB_PORT: "3306"
+    PM_DB_ROOT_USER: root
+    PM_DB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    PM_DB_NAME: ${PM_DB_NAME:-workflow}
+    PM_WORKSPACE: ${PM_WORKSPACE:-workflow}
+    PM_ADMIN_USER: ${PM_ADMIN_USER:-admin}
+    PM_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+    PM_DEFAULT_LANG: ${PM_DEFAULT_LANG:-fa}
+    PM_PUBLIC_HOST: ${PM_PUBLIC_HOST:-localhost}
+    PM_PUBLIC_PORT: ${PM_PUBLIC_PORT:-8080}
+    PHP_DATE_TIMEZONE: ${PHP_DATE_TIMEZONE:-Asia/Tehran}
+  secrets:
+    - db_root_password
+    - admin_password
+  volumes:
+    - shared_state:/opt/processmaker/shared
+    - ./public/source-release.json:/opt/processmaker/workflow/public_html/source-release.json:ro
+  networks:
+    - backend
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  db:
+    image: mysql:5.7@sha256:4bc6bc963e6d8443453676cae56536f4b8156d78bae03c0145cbe47c2aad73bb
+    platform: linux/amd64
+    command:
+      - --character-set-server=utf8
+      - --collation-server=utf8_general_ci
+      - --sql-mode=NO_ENGINE_SUBSTITUTION
+    environment:
+      MYSQL_DATABASE: ${PM_DB_NAME:-workflow}
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+      PM_DB_NAME: ${PM_DB_NAME:-workflow}
+    secrets:
+      - db_root_password
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -uroot --password="$$(cat /run/secrets/db_root_password)" --silent
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  initialize:
+    <<: *app-common
+    entrypoint:
+      - /opt/nitel/bootstrap/initialize.sh
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    <<: *app-common
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_BIND_IP:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://127.0.0.1:8080/ >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  backend: {}
+
+volumes:
+  db_data: {}
+  shared_state: {}
+
+secrets:
+  db_root_password:
+    file: ./secrets/db_root_password.txt
+  admin_password:
+    file: ./secrets/admin_password.txt
