@@ -21,10 +21,176 @@ volumes preserve both the database and ProcessMaker shared state.
 > production runtime. Use a controlled server, TLS, firewalling, monitoring,
 > and tested backups.
 
+## Windows Server with WSL 2
+
+Docker Desktop is not supported on Windows Server. This deployment can instead
+run with Docker Engine inside an Ubuntu WSL 2 distribution. A native Linux VPS
+is simpler and is recommended for a long-running production installation, but
+WSL 2 is suitable when the VPS must remain on Windows Server.
+
+Before starting, confirm all of the following:
+
+- The VPS is x86-64/AMD64.
+- The VPS provider exposes nested virtualization to the Windows guest. WSL 2
+  and Linux containers cannot run without it.
+- Windows Server 2022 or 2025 is installed. Windows Server 2019 requires the
+  [manual Microsoft WSL installation procedure](https://learn.microsoft.com/en-us/windows/wsl/install-on-server#install-wsl-on-previous-versions-of-windows-server-and-server-core).
+- TCP port 8080 can be allowed in both Windows Defender Firewall and any
+  firewall/security group provided by the VPS company.
+
+Docker's documentation confirms that
+[Docker Desktop is unsupported on Windows Server](https://docs.docker.com/desktop/setup/install/windows-install/).
+
+### Install WSL 2 and Ubuntu
+
+Open **PowerShell as Administrator** and run:
+
+```powershell
+wsl.exe --install -d Ubuntu
+Restart-Computer
+```
+
+After the server restarts, open Ubuntu once to finish creating its Linux user,
+then verify that the distribution uses WSL 2:
+
+```powershell
+wsl.exe --list --verbose
+```
+
+The `VERSION` column for Ubuntu must be `2`. If it is not, run:
+
+```powershell
+wsl.exe --set-version Ubuntu 2
+```
+
+If WSL reports that virtualization is unavailable, it must be enabled by the
+VPS provider; installing more Windows features will not bypass that limitation.
+
+### Install Docker Engine inside Ubuntu
+
+Enter Ubuntu from PowerShell:
+
+```powershell
+wsl.exe -d Ubuntu
+```
+
+Run the following commands in the Ubuntu shell. These configure Docker's
+official apt repository and install Docker Engine with the Compose v2 plugin:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl openssl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+. /etc/os-release
+
+sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo docker run --rm hello-world
+sudo docker compose version
+```
+
+The current official instructions are maintained in
+[Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/).
+Use `sudo docker ...` for the deployment commands, or follow Docker's Linux
+post-installation instructions to grant a trusted user access to the Docker
+socket.
+
+### Deploy from inside Ubuntu
+
+Store this repository in Ubuntu's Linux filesystem, for example under
+`~/processmaker_deployment`, rather than under `/mnt/c`. In `.env`, use:
+
+```dotenv
+APP_BIND_IP=0.0.0.0
+APP_PORT=8080
+PM_PUBLIC_HOST=YOUR_WINDOWS_SERVER_PUBLIC_IP
+PM_PUBLIC_PORT=8080
+```
+
+Then run the commands in [Fresh server: copy and paste](#fresh-server-copy-and-paste)
+inside Ubuntu, adding `sudo` before each `docker` command if the Linux user has
+not been added to the Docker group.
+
+Confirm the application responds inside WSL before configuring Windows:
+
+```bash
+curl --fail --show-error --silent http://127.0.0.1:8080/ >/dev/null
+sudo docker compose ps
+```
+
+### Forward Windows port 8080 to WSL 2
+
+WSL 2 normally has a private, dynamically assigned IP address. Windows can
+usually reach the application through `localhost`, but other computers cannot
+reach it through the Windows server IP without Windows-side forwarding. In
+**PowerShell as Administrator**, run:
+
+```powershell
+$wslIp = ((wsl.exe -d Ubuntu hostname -I) -split '\s+')[0]
+
+netsh interface portproxy delete v4tov4 `
+  listenaddress=0.0.0.0 listenport=8080 | Out-Null
+
+netsh interface portproxy add v4tov4 `
+  listenaddress=0.0.0.0 listenport=8080 `
+  connectaddress=$wslIp connectport=8080
+
+if (-not (Get-NetFirewallRule `
+    -DisplayName "Rashen ProcessMaker 8080" -ErrorAction SilentlyContinue)) {
+  New-NetFirewallRule `
+    -DisplayName "Rashen ProcessMaker 8080" `
+    -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
+}
+```
+
+Also allow inbound TCP port 8080 in the VPS provider's external firewall or
+security group. Verify the forwarding rule with:
+
+```powershell
+netsh interface portproxy show v4tov4
+Test-NetConnection -ComputerName 127.0.0.1 -Port 8080
+```
+
+The site should then be available at:
+
+```text
+http://YOUR_WINDOWS_SERVER_PUBLIC_IP:8080/
+```
+
+Microsoft documents this NAT behavior and `portproxy` approach in
+[Accessing network applications with WSL](https://learn.microsoft.com/en-us/windows/wsl/networking#accessing-a-wsl-2-distribution-from-your-local-area-network-lan).
+
+The WSL IP address can change after `wsl.exe --shutdown` or a Windows restart.
+If access stops working, repeat the PowerShell forwarding commands so
+`connectaddress` contains the new WSL IP. Also remember that a WSL distribution
+does not necessarily start until its owning Windows user launches it. For
+unattended recovery after a Windows reboot, configure a Task Scheduler task
+under the Windows account that owns the Ubuntu distribution, or start Ubuntu
+and run `docker compose up -d` manually.
+
+Direct HTTP access on port 8080 is intended for initial testing. For an
+internet-facing production deployment, use a domain, HTTPS, and a reverse
+proxy, and forward ports 80/443 as required instead of exposing the application
+over plain HTTP.
+
 ## Fresh server: copy and paste
 
-Prerequisites: a Linux x86-64 server, Docker Engine, Docker Compose v2,
-OpenSSL, and enough disk space for two persistent volumes.
+Prerequisites: a Linux x86-64 server or Ubuntu under WSL 2, Docker Engine,
+Docker Compose v2, OpenSSL, and enough disk space for two persistent volumes.
 
 Obtain this deployment repository on the server, then run:
 
