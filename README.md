@@ -237,6 +237,47 @@ Do not commit, email, or paste either file under `secrets/`. Changing the
 admin secret after first initialization does not reset an existing user's
 password.
 
+## Optional Navicat database access
+
+MySQL is published on host port 3306 but bound to `127.0.0.1` by default. This
+supports a Navicat SSH tunnel without exposing MySQL to the internet. Use these
+connection values in Navicat:
+
+```text
+MySQL host: 127.0.0.1
+MySQL port: 3306
+Database: workflow (or PM_DB_NAME from .env)
+Username: root
+Password: contents of secrets/db_root_password.txt
+```
+
+Configure Navicat's SSH tab with the VPS address, SSH port 22, and the VPS SSH
+account. No inbound firewall rule for port 3306 is needed in this mode.
+
+If direct public database access is unavoidable, set the following in `.env`:
+
+```dotenv
+DB_BIND_IP=0.0.0.0
+DB_PORT=3306
+```
+
+Then recreate only the database container so Docker applies the published port:
+
+```bash
+docker compose up -d --no-deps --force-recreate --wait db
+docker compose ps
+sudo ss -ltnp | grep ':3306'
+```
+
+Before recreating the container, restrict inbound TCP 3306 in the VPS
+provider's firewall/security group to the Navicat computer's fixed public
+IP using a `/32` source rule. Apply an equivalent host firewall restriction;
+never allow TCP 3306 from `0.0.0.0/0` or `Anywhere`. Docker warns that
+published container ports can bypass UFW rules, so the provider firewall is
+required rather than relying on UFW alone. If the VPS is behind NAT, also
+forward public TCP 3306 to the VM's TCP 3306. Prefer the SSH-tunnel mode above
+whenever possible.
+
 ## Verification and routine operation
 
 ```bash
