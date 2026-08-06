@@ -1,4 +1,6 @@
 .env
 secrets/
 backups/
+public-assets/*
+!public-assets/.gitkeep
 *.log

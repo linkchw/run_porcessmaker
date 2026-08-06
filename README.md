@@ -6,13 +6,13 @@ tools are not required on the deployment server.
 
 ## Current release
 
-- Application image: `linkchw/processmaker:3.8.3-9b93d05`
-- Image digest: `sha256:59a2fb456655a2ca21794b972d32920099d3dcbda797788b8e11d8ef444fc7d7`
-- Application source commit: `9b93d0561e494fe7bf196244a98d573ed752dfd4`
+- Application image: `linkchw/processmaker:3.8.3-924e97d`
+- Image digest: `sha256:cd4530e9f8fa0987d09808e76f4f949f24b0c0627e9acbe40fec7b750ae377cc`
+- Application source commit: `924e97d1a0c8661e9bbc49a3993e2b5394dce232`
 - Platform: `linux/amd64`
 
 The image and MySQL image are pinned by digest in `compose.yaml`. Docker will
-pull them automatically. The database is not exposed to the host, and named
+pull them automatically. MySQL binds to host loopback by default, and named
 volumes preserve both the database and ProcessMaker shared state.
 
 > Compatibility notice: this release uses ProcessMaker 3.8.3 with MySQL 5.7.
@@ -237,6 +237,43 @@ Do not commit, email, or paste either file under `secrets/`. Changing the
 admin secret after first initialization does not reset an existing user's
 password.
 
+## Public images for Dynaform HTML panels
+
+The `PUBLIC_ASSETS_PATH` directory is mounted read-only in the application and
+served anonymously at `/user-assets/`. It accepts PNG, JPG/JPEG, GIF, WebP,
+AVIF, and ICO files only; directory listings and active content are denied.
+Keep only non-sensitive presentation images here.
+
+With the default `.env` value, add an image on the server with:
+
+```bash
+install -d -m 0755 public-assets
+install -m 0644 /path/to/company-banner.png public-assets/company-banner.png
+```
+
+Use a root-relative URL in a Dynaform HTML panel so the same content works with
+an IP address, domain, non-default port, or HTTPS:
+
+```html
+<img src="/user-assets/company-banner.png" alt="Company banner"
+     style="max-width:100%;height:auto;">
+```
+
+The absolute form is `https://YOUR_DOMAIN/user-assets/company-banner.png`.
+
+## Jalali dates in SQL
+
+The application initializer installs `pdate_RG(DATETIME)` in `PM_DB_NAME` on
+fresh deployments and validates it on upgrades. It returns Latin digits in
+`YYYY/MM/DD HH:MM:SS` format. The Gregorian calendar date is converted while
+the input clock time is copied unchanged; no timezone conversion is applied.
+
+```sql
+SELECT pdate_RG(ASSIGN_DATE) AS ASSIGN_DATE,
+       pdate_RG(UPDATE_DATE) AS UPDATE_DATE
+FROM fg_vw_Approves;
+```
+
 ## Optional Navicat database access
 
 MySQL is published on host port 3306 but bound to `127.0.0.1` by default. This
@@ -308,8 +345,9 @@ database and shared-state volumes.
 
 ## Back up one consistent release point
 
-The database dump and shared-state archive must always be kept together. The
-commands below assume the default database name from `.env`.
+The database dump, shared-state archive, and public-assets archive must always
+be kept together. The commands below assume the default database name and
+public-assets path from `.env`.
 
 ```bash
 backup_dir="backups/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -317,6 +355,7 @@ mkdir -p "$backup_dir"
 docker compose stop app
 docker compose exec -T db sh -c 'exec mysqldump -uroot --password="$(cat /run/secrets/db_root_password)" --single-transaction --routines --triggers --events "$PM_DB_NAME"' >"$backup_dir/database.sql"
 docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/processmaker/shared -czf - .' >"$backup_dir/shared-state.tar.gz"
+docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/processmaker/public-assets -czf - .' >"$backup_dir/public-assets.tar.gz"
 cp compose.yaml public/source-release.json "$backup_dir/"
 sha256sum "$backup_dir"/* >"$backup_dir/SHA256SUMS"
 docker compose start app
@@ -340,6 +379,8 @@ production copy.
 docker compose up -d --wait db
 docker compose exec -T db sh -c 'exec mysql -uroot --password="$(cat /run/secrets/db_root_password)" "$PM_DB_NAME"' <BACKUP_DIRECTORY/database.sql
 docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/processmaker/shared -xzf -' <BACKUP_DIRECTORY/shared-state.tar.gz
+mkdir -p public-assets
+tar -C public-assets -xzf BACKUP_DIRECTORY/public-assets.tar.gz
 docker compose run --rm initialize
 docker compose up -d --no-deps --wait app
 ```
