@@ -6,9 +6,9 @@ tools are not required on the deployment server.
 
 ## Current release
 
-- Application image: `linkchw/processmaker:3.8.3-bba01d8`
-- Image digest: `sha256:9dbf42dfe0ad5daf6b956dbcc10e4e1f3f4cb7a2ea5fa57793132353d01e312d`
-- Application source commit: `bba01d8`
+- Application image: `linkchw/processmaker:3.8.3-c7a05f5`
+- Image digest: `sha256:6378489f8357d1159df3baa4bfb6490c113a0c668b38df7251eba4fc6c02c67a`
+- Application source commit: `c7a05f5`
 - Platform: `linux/amd64`
 
 The image and MySQL image are pinned by digest in `compose.yaml`. Docker will
