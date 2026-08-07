@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-rashen-processmaker}
 
 x-app-common: &app-common
-  image: linkchw/processmaker:3.8.3-924e97d@sha256:cd4530e9f8fa0987d09808e76f4f949f24b0c0627e9acbe40fec7b750ae377cc
+  image: linkchw/processmaker:3.8.3-b968226@sha256:70dc45a51ae08991fdc5d407281eb71bef9cbaa67af0e51c515d9d1c8937918a
   platform: linux/amd64
   environment:
     PM_DB_HOST: db
@@ -15,7 +15,9 @@ x-app-common: &app-common
     PM_DEFAULT_LANG: ${PM_DEFAULT_LANG:-fa}
     PM_PUBLIC_HOST: ${PM_PUBLIC_HOST:-localhost}
     PM_PUBLIC_PORT: ${PM_PUBLIC_PORT:-8080}
+    PM_PUBLIC_SCHEME: ${PM_PUBLIC_SCHEME:-http}
     PHP_DATE_TIMEZONE: ${PHP_DATE_TIMEZONE:-Asia/Tehran}
+    PM_SCHEDULER_INTERVAL_SECONDS: ${PM_SCHEDULER_INTERVAL_SECONDS:-60}
   secrets:
     - db_root_password
     - admin_password
@@ -23,6 +25,8 @@ x-app-common: &app-common
     - shared_state:/opt/processmaker/shared
     - ${PUBLIC_ASSETS_PATH:-./public-assets}:/opt/processmaker/public-assets:ro
     - ./public/source-release.json:/opt/processmaker/workflow/public_html/source-release.json:ro
+    - ./scripts/processmaker-scheduler.sh:/opt/nitel/processmaker-scheduler.sh:ro
+    - ./scripts/processmaker-cron-bootstrap.php:/opt/nitel/processmaker-cron-bootstrap.php:ro
   networks:
     - backend
   logging:
@@ -90,6 +94,45 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    <<: *app-common
+    # Required while ProcessMaker asynchronous routing is enabled (the default).
+    # It consumes RouteCase jobs that create the next delegation and assignee.
+    entrypoint:
+      - php
+      - /opt/processmaker/processmaker
+    command:
+      - artisan
+      - queue:work
+      - --workspace=${PM_WORKSPACE:-workflow}
+      - --sleep=${PM_QUEUE_SLEEP:-3}
+      - --max-time=${PM_QUEUE_MAX_TIME:-3600}
+      - --memory=${PM_QUEUE_MEMORY:-256}
+    user: www-data
+    working_dir: /opt/processmaker
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
+    init: true
+    stop_grace_period: 1m
+    restart: unless-stopped
+
+  scheduler:
+    <<: *app-common
+    # Runs timers, scheduled cases, message events, notifications, and upkeep.
+    # This is a singleton; do not scale it above one replica.
+    entrypoint:
+      - bash
+      - /opt/nitel/processmaker-scheduler.sh
+    user: www-data
+    working_dir: /opt/processmaker
+    depends_on:
+      initialize:
+        condition: service_completed_successfully
+    init: true
+    stop_grace_period: 2m
     restart: unless-stopped
 
 networks:

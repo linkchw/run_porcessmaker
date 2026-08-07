@@ -6,9 +6,9 @@ tools are not required on the deployment server.
 
 ## Current release
 
-- Application image: `linkchw/processmaker:3.8.3-924e97d`
-- Image digest: `sha256:cd4530e9f8fa0987d09808e76f4f949f24b0c0627e9acbe40fec7b750ae377cc`
-- Application source commit: `924e97d1a0c8661e9bbc49a3993e2b5394dce232`
+- Application image: `linkchw/processmaker:3.8.3-b968226`
+- Image digest: `sha256:70dc45a51ae08991fdc5d407281eb71bef9cbaa67af0e51c515d9d1c8937918a`
+- Application source commit: `b9682262733f64fae64a2be9d715bb0a4b6a67c4`
 - Platform: `linux/amd64`
 
 The image and MySQL image are pinned by digest in `compose.yaml`. Docker will
@@ -119,6 +119,7 @@ APP_BIND_IP=0.0.0.0
 APP_PORT=8080
 PM_PUBLIC_HOST=YOUR_WINDOWS_SERVER_PUBLIC_IP
 PM_PUBLIC_PORT=8080
+PM_PUBLIC_SCHEME=http
 ```
 
 Then run the commands in [Fresh server: copy and paste](#fresh-server-copy-and-paste)
@@ -204,7 +205,29 @@ docker compose pull
 docker compose up -d --wait
 docker compose ps
 docker compose logs --no-log-prefix initialize
+docker compose logs --tail=100 worker
+docker compose logs --tail=100 scheduler
 ```
+
+`app`, `worker`, `scheduler`, and `db` must remain running. ProcessMaker queues
+case routing after a Dynaform submission; `worker` consumes that job and
+creates the next delegation and assignee. If the worker is stopped, the current
+task can close while the case appears to have no next owner. The singleton
+`scheduler` runs timers, scheduled cases, message events, notifications, and
+recurring maintenance every minute. Never scale `scheduler` above one replica.
+
+Check it at any time:
+
+```bash
+docker compose ps app worker scheduler db
+docker compose logs --tail=100 worker
+docker compose logs --tail=100 scheduler
+```
+
+After first adding this worker, it will consume any existing pending routing
+jobs. Back up the database first, then watch the worker log and confirm the
+affected cases receive their next delegation. Do not delete rows from
+`jobs_pending` manually.
 
 For direct testing by server IP, set these values in `.env` before starting:
 
@@ -213,6 +236,7 @@ APP_BIND_IP=0.0.0.0
 APP_PORT=8080
 PM_PUBLIC_HOST=YOUR_SERVER_IP
 PM_PUBLIC_PORT=8080
+PM_PUBLIC_SCHEME=http
 ```
 
 Then allow TCP port 8080 in the server firewall and open:
@@ -223,8 +247,9 @@ http://YOUR_SERVER_IP:8080/
 
 For an internet-facing deployment, keep `APP_BIND_IP=127.0.0.1` and place
 Nginx, Caddy, or another reverse proxy on the host in front of
-`http://127.0.0.1:8080`. Set `PM_PUBLIC_HOST` to the public domain and
-`PM_PUBLIC_PORT=443`. The reverse proxy must provide HTTPS.
+`http://127.0.0.1:8080`. Set `PM_PUBLIC_HOST` to the public domain,
+`PM_PUBLIC_PORT=443`, and `PM_PUBLIC_SCHEME=https`. The reverse proxy must
+provide HTTPS.
 
 The administrator username defaults to the `PM_ADMIN_USER` value in `.env`.
 Read the generated password locally on the server with:
@@ -260,6 +285,29 @@ an IP address, domain, non-default port, or HTTPS:
 ```
 
 The absolute form is `https://YOUR_DOMAIN/user-assets/company-banner.png`.
+
+## Settings logo persistence
+
+Logos uploaded through **Admin > Settings > Logo** are different from public
+Dynaform images. They remain private to ProcessMaker and are stored in the
+existing `shared_state` Docker volume at:
+
+```text
+/opt/processmaker/shared/sites/<workspace>/files/logos
+```
+
+The application creates this directory with writable `www-data` ownership at
+startup. Verify it without changing data:
+
+```bash
+docker compose exec app sh -lc \
+  'logo_dir="/opt/processmaker/shared/sites/$PM_WORKSPACE/files/logos"; test -d "$logo_dir"; test -w "$logo_dir"; ls -la "$logo_dir"'
+```
+
+Upload, select, and delete these logos only through ProcessMaker Settings.
+They do not have a `/user-assets/` URL. The shared-state backup described below
+already includes the complete logo directory, and replacing or recreating only
+the app container does not remove it.
 
 ## Jalali dates in SQL
 
@@ -321,6 +369,8 @@ whenever possible.
 docker compose ps
 curl --fail --show-error --silent http://127.0.0.1:8080/ >/dev/null
 docker compose logs --tail=100 app
+docker compose logs --tail=100 worker
+docker compose logs --tail=100 scheduler
 docker compose logs --tail=100 initialize
 ```
 
@@ -336,7 +386,7 @@ Common lifecycle commands:
 ```bash
 docker compose stop
 docker compose start
-docker compose restart app
+docker compose restart app worker scheduler
 docker compose up -d --wait
 ```
 
@@ -345,20 +395,21 @@ database and shared-state volumes.
 
 ## Back up one consistent release point
 
-The database dump, shared-state archive, and public-assets archive must always
+The database dump, shared-state archive (including Settings logos), and
+public-assets archive must always
 be kept together. The commands below assume the default database name and
 public-assets path from `.env`.
 
 ```bash
 backup_dir="backups/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$backup_dir"
-docker compose stop app
+docker compose stop app worker scheduler
 docker compose exec -T db sh -c 'exec mysqldump -uroot --password="$(cat /run/secrets/db_root_password)" --single-transaction --routines --triggers --events "$PM_DB_NAME"' >"$backup_dir/database.sql"
 docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/processmaker/shared -czf - .' >"$backup_dir/shared-state.tar.gz"
 docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/processmaker/public-assets -czf - .' >"$backup_dir/public-assets.tar.gz"
 cp compose.yaml public/source-release.json "$backup_dir/"
 sha256sum "$backup_dir"/* >"$backup_dir/SHA256SUMS"
-docker compose start app
+docker compose start app worker scheduler
 ```
 
 Encrypt the backup, copy it off the server, and test restoration regularly.
@@ -382,7 +433,7 @@ docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/processmak
 mkdir -p public-assets
 tar -C public-assets -xzf BACKUP_DIRECTORY/public-assets.tar.gz
 docker compose run --rm initialize
-docker compose up -d --no-deps --wait app
+docker compose up -d --no-deps --wait app worker scheduler
 ```
 
 Verify login, representative cases, uploads/downloads, Farsi/RTL forms, and
@@ -405,9 +456,9 @@ deployment-repository commit:
 ```bash
 git pull --ff-only
 docker compose config --quiet
-docker compose pull app initialize
+docker compose pull app initialize worker scheduler
 docker compose run --rm initialize
-docker compose up -d --no-deps --force-recreate --wait app
+docker compose up -d --no-deps --force-recreate --wait app worker scheduler
 docker compose ps
 ```
 
