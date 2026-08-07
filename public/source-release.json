@@ -1,8 +1,8 @@
 {
-  "distribution": "rashen-processmaker-3.8.3-b968226",
-  "image": "linkchw/processmaker:3.8.3-b968226",
-  "image_digest": "sha256:70dc45a51ae08991fdc5d407281eb71bef9cbaa67af0e51c515d9d1c8937918a",
-  "source_commit": "b9682262733f64fae64a2be9d715bb0a4b6a67c4",
-  "source_archive": "https://github.com/linkchw/process-maker-customized/archive/b9682262733f64fae64a2be9d715bb0a4b6a67c4.tar.gz",
+  "distribution": "rashen-processmaker-3.8.3-df94025",
+  "image": "linkchw/processmaker:3.8.3-df94025",
+  "image_digest": "sha256:b2e716951f6189bf950d73ef2789792b80a4f9d636c1c8d9871483020a13698f",
+  "source_commit": "df94025fc70c53290ed7a48d24a0f2ad94ac713e",
+  "source_archive": "https://github.com/linkchw/process-maker-customized/archive/df94025fc70c53290ed7a48d24a0f2ad94ac713e.tar.gz",
   "license": "AGPL-3.0-only"
 }
