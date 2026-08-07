@@ -441,6 +441,31 @@ scheduler behavior before treating a restored deployment as usable.
 
 ## Upgrade to a newly published application image
 
+### Recovering an older deployment with an anonymous application volume
+
+If `initialize` reports `refusing to seed a non-empty, unrecognized application
+volume`, the old Compose stack used Docker's anonymous `/opt/processmaker`
+volume. Do not run `docker compose down -v`: that can remove the database.
+Back up the database first, then copy the old application volume into the new
+named volume before starting the updated stack:
+
+```bash
+OLD_APP_VOLUME="$(docker inspect rashen-processmaker-app-1 \
+  --format '{{range .Mounts}}{{if eq .Destination "/opt/processmaker"}}{{.Name}}{{end}}{{end}}')"
+test -n "$OLD_APP_VOLUME" && echo "old app volume: $OLD_APP_VOLUME"
+docker volume create rashen-processmaker_app_state
+docker run --rm \
+  -v "$OLD_APP_VOLUME:/from:ro" \
+  -v rashen-processmaker_app_state:/to \
+  alpine:3.20 sh -c 'cp -a /from/. /to/'
+docker compose down
+docker compose up -d --wait
+```
+
+The command copies application files only; `db_data` and `shared_state` remain
+separate. If the volume name printed is empty, stop and inspect the container
+mounts instead of guessing a volume name.
+
 Every application release must also update this deployment repository:
 
 1. Replace the application tag and digest in `compose.yaml`.
