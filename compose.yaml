@@ -28,6 +28,8 @@ x-app-common: &app-common
     - app_state:/opt/processmaker
     - shared_state:/opt/processmaker/shared
     - ${PUBLIC_ASSETS_PATH:-./public-assets}:/opt/processmaker/public-assets:ro
+    # The initializer updates this file with the exact deployed image/source.
+    - ./public/source-release.json:/opt/processmaker/workflow/public_html/source-release.json
     - ./scripts/processmaker-scheduler.sh:/opt/nitel/processmaker-scheduler.sh:ro
     - ./scripts/processmaker-cron-bootstrap.php:/opt/nitel/processmaker-cron-bootstrap.php:ro
   networks:
