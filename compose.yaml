@@ -27,7 +27,10 @@ x-app-common: &app-common
     # anonymous, unmanageable volume during upgrades.
     - app_state:/opt/processmaker
     - shared_state:/opt/processmaker/shared
-    - ${PUBLIC_ASSETS_PATH:-./public-assets}:/opt/processmaker/public-assets:ro
+    # Persistent, host-managed assets (logos and Dynaform images). This must
+    # be writable because initialization normalizes ownership and the admin
+    # settings upload writes into this directory.
+    - ${PUBLIC_ASSETS_PATH:-./public-assets}:/opt/processmaker/public-assets
     # The initializer updates this file with the exact deployed image/source.
     - ./public/source-release.json:/opt/processmaker/workflow/public_html/source-release.json
     - ./scripts/processmaker-scheduler.sh:/opt/nitel/processmaker-scheduler.sh:ro
