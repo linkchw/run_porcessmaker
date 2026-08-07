@@ -22,6 +22,10 @@ x-app-common: &app-common
     - db_root_password
     - admin_password
   volumes:
+    # The pinned compatibility image declares /opt/processmaker as a Docker
+    # volume. Make that volume explicit so Compose does not create an
+    # anonymous, unmanageable volume during upgrades.
+    - app_state:/opt/processmaker
     - shared_state:/opt/processmaker/shared
     - ${PUBLIC_ASSETS_PATH:-./public-assets}:/opt/processmaker/public-assets:ro
     - ./public/source-release.json:/opt/processmaker/workflow/public_html/source-release.json:ro
@@ -140,6 +144,7 @@ networks:
 
 volumes:
   db_data: {}
+  app_state: {}
   shared_state: {}
 
 secrets:
