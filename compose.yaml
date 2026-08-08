@@ -1,7 +1,7 @@
 name: ${COMPOSE_PROJECT_NAME:-rashen-processmaker}
 
 x-app-common: &app-common
-  image: linkchw/processmaker:3.8.3-d118c7a@sha256:10b558b3e27663fc2d5ff3bc6abff066c7c71002c0d2199f624a5e51335146bb
+  image: linkchw/processmaker:3.8.3-29524e1@sha256:6b57dd16521ebee84f14db4658c645d6b0bc5a01b28033f398002d515a5738ee
   platform: linux/amd64
   environment:
     PM_DB_HOST: db
